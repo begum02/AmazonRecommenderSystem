@@ -80,8 +80,8 @@ class AmazonDataMerger:
     def load(self, files):
 
         # parquet dosyalarını dataframe olarak yükle
-        items = pd.read_parquet(files["items"])
-        reviews = pd.read_parquet(files["reviews"])
+        items = pd.read_parquet(files["items"], engine='fastparquet')
+        reviews = pd.read_parquet(files["reviews"], engine='fastparquet')
 
         return items, reviews
 
@@ -179,31 +179,29 @@ class AmazonDataMerger:
     # 5. TÜM SÜRECİ ÇALIŞTIR
     # =========================================
     def run(self):
-
-        # dosyaları bul
         files = self.get_files()
-
         all_df = []
 
-        # her kategori için pipeline çalıştır
         for cat, f in files.items():
-            logger.info(f"İşleniyor: {cat}")
+            try:
+                logger.info(f"İşleniyor: {cat}")
+                items, reviews = self.load(f)
+                items, reviews = self.standardize(items, reviews, cat)
+                merged = self.merge(items, reviews, cat)
 
-            items, reviews = self.load(f)
+                if len(merged) > 0:
+                    all_df.append(merged)
+            except Exception as e:
+                # Hata veren dosyayı raporla ama kodu durdurma
+                logger.error(f"HATA: {cat} kategorisi işlenemedi! Sebep: {e}")
+                continue 
 
-            # en kritik adım
-            items, reviews = self.standardize(items, reviews, cat)
+        if not all_df:
+            logger.error("Hiçbir kategori başarıyla birleştirilemedi!")
+            return pd.DataFrame()
 
-            merged = self.merge(items, reviews, cat)
-
-            if len(merged) > 0:
-                all_df.append(merged)
-
-        # tüm kategorileri tek dataframe haline getir
         master = pd.concat(all_df, ignore_index=True)
-
-        logger.info(f"FINAL: {len(master)} satır")
-
+        logger.info(f"FINAL: {len(master)} satır birleştirildi.")
         return master
 
     # =========================================
@@ -227,7 +225,7 @@ if __name__ == "__main__":
     BASE = Path(__file__).resolve().parent.parent
 
     merger = AmazonDataMerger(
-        raw_data_path=BASE / "data/raw",
+        raw_data_path=Path(__file__).resolve().parent / "raw",
         output_path=BASE / "data"
     )
 
